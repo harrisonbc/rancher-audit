@@ -1,0 +1,17 @@
+# Credentials and Configuration (CRITICAL)
+config.yaml
+*.bak
+.env
+
+# Generated Excel Reports
+*.xlsx
+
+# Python Virtual Environment and Caches
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# Archived Files
+archive/

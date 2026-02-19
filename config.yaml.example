@@ -1,0 +1,12 @@
+rancher_instances:
+
+  - name: "Production-Rancher"
+    url: "https://rancher.example.com"
+    token: "token-abcde:1234567890abcdefghijklmnopqrstuvwxyz"
+    comment: "Main production management plane"
+
+  - name: "Dev-Rancher"
+    url: "https://rancher-dev.example.com"
+    token: "token-vwxyz:zyxwvutsrqponmlkjihgfedcba0987654321"
+    comment: "Sandbox for testing k8s upgrades"
+
