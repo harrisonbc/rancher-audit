@@ -13,7 +13,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _K8S_LIFECYCLES = None
 _RANCHER_LIFECYCLES = None
 
-# Hardcoded Harvester Lifecycles (Since no public API exists for Harvester yet)
+# Hardcoded Harvester Lifecycles
 HARVESTER_LIFECYCLES = {
     "1.7": {"eom": "2026-08-09", "eol": "2027-08-09"},
     "1.6": {"eom": "2026-04-16", "eol": "2027-04-16"},
@@ -85,11 +85,9 @@ def fetch_rancher_lifecycles():
         resp.raise_for_status()
         _RANCHER_LIFECYCLES = {}
         for item in resp.json():
-            # endoflife.date provides 'support' (EOM) and 'eol' for Rancher
             eol = item.get('eol', '2000-01-01')
             eom = item.get('support')
             if not isinstance(eom, str):
-                # Fallback to a 60-day warning window if EOM is missing
                 eol_date = datetime.strptime(eol, "%Y-%m-%d").date()
                 eom = (eol_date - timedelta(days=60)).strftime("%Y-%m-%d")
             _RANCHER_LIFECYCLES[item['cycle']] = {"eol": eol, "eom": eom}
@@ -142,10 +140,8 @@ def get_rancher_version_status(version_str, server_name="Unknown"):
         try:
             minor_num = int(minor_version.split('.')[1])
             if minor_num < 8: 
-                print(f"    -> 🟥 [RED] Rancher Server {server_name} (Version {version_str} is extremely old)")
                 return "Red" 
             elif minor_num >= 12: 
-                print(f"    -> 🟩 [GREEN] Rancher Server {server_name} (Version {version_str} is brand new)")
                 return "Green" 
         except Exception: pass
         return "Unknown"
@@ -155,13 +151,10 @@ def get_rancher_version_status(version_str, server_name="Unknown"):
     eom_date = datetime.strptime(lifecycles[minor_version]["eom"], "%Y-%m-%d").date()
     
     if today >= eol_date:
-        print(f"    -> 🟥 [RED] Rancher Server {server_name} (Version {version_str} passed EOL on {eol_date})")
         return "Red"
     elif today >= eom_date:
-        print(f"    -> 🟨 [YELLOW] Rancher Server {server_name} (Version {version_str} passed EOM on {eom_date})")
         return "Yellow"
     else:
-        print(f"    -> 🟩 [GREEN] Rancher Server {server_name} (Version {version_str} is supported)")
         return "Green"
 
 def get_harvester_version_status(version_str, cluster_name="Unknown"):
@@ -174,10 +167,8 @@ def get_harvester_version_status(version_str, cluster_name="Unknown"):
         try:
             minor_num = int(minor_version.split('.')[1])
             if minor_num < 4: 
-                print(f"    -> 🟥 [RED] Harvester {cluster_name} (Version {version_str} is extremely old)")
                 return "Red"
             elif minor_num >= 8:
-                print(f"    -> 🟩 [GREEN] Harvester {cluster_name} (Version {version_str} is brand new)")
                 return "Green" 
         except Exception: pass
         return "Unknown"
@@ -187,13 +178,10 @@ def get_harvester_version_status(version_str, cluster_name="Unknown"):
     eom_date = datetime.strptime(HARVESTER_LIFECYCLES[minor_version]["eom"], "%Y-%m-%d").date()
     
     if today >= eol_date:
-        print(f"    -> 🟥 [RED] Harvester {cluster_name} (Version {version_str} passed EOL on {eol_date})")
         return "Red"
     elif today >= eom_date:
-        print(f"    -> 🟨 [YELLOW] Harvester {cluster_name} (Version {version_str} passed EOM on {eom_date})")
         return "Yellow"
     else:
-        print(f"    -> 🟩 [GREEN] Harvester {cluster_name} (Version {version_str} is supported)")
         return "Green"
 
 # ==========================================
@@ -209,7 +197,9 @@ def get_server_summary(instance):
         "Name": instance['name'],
         "URL": clean_url,
         "Rancher Version": "Unknown",
+        "Rancher Status": "Unknown",
         "Local K8s Version": "Unknown",
+        "K8s Status": "Unknown",
         "AWS Region": "N/A",
         "Backup Operator": "Not Found",
         "Config Comment": instance.get('comment', "")
@@ -219,11 +209,13 @@ def get_server_summary(instance):
         v_resp = requests.get(f"{base_url}/v3/settings/server-version", headers=headers, verify=False, timeout=10)
         if v_resp.status_code == 200:
             summary["Rancher Version"] = v_resp.json().get('value', 'Unknown')
+            summary["Rancher Status"] = get_rancher_version_status(summary["Rancher Version"], summary["Name"])
 
         c_resp = requests.get(f"{base_url}/v3/clusters/local", headers=headers, verify=False, timeout=10)
         if c_resp.status_code == 200:
             c_data = c_resp.json()
             summary["Local K8s Version"] = c_data.get('version', {}).get('gitVersion', 'N/A')
+            summary["K8s Status"] = get_k8s_version_status(summary["Local K8s Version"], f"[{summary['Name']}] Local Server")
             
             region = ""
             for key in ['amazonElasticContainerServiceConfig', 'eksConfig']:
@@ -332,12 +324,20 @@ def get_cluster_data(instances):
                     if not region:
                         region = node_meta["region"]
 
+                c_name = cluster.get('name', 'Unknown')
+
                 if provider_type == 'Harvester':
                     hv_version = get_harvester_version(base_url, cluster_id, headers)
+                    
+                    hv_status = get_harvester_version_status(hv_version, c_name)
+                    k8s_status = get_k8s_version_status(git_version, c_name)
+                    
                     harvester_clusters.append({
-                        "Cluster Name": cluster.get('name'),
+                        "Cluster Name": c_name,
                         "Harvester Version": hv_version,
+                        "Harvester Status": hv_status,
                         "Kubernetes Version": git_version,
+                        "K8s Status": k8s_status,
                         "CPU Arch": arch,
                         "Rancher Server": instance['name'],
                         "Comments": ""
@@ -354,12 +354,15 @@ def get_cluster_data(instances):
                     memory_gib = parse_memory(allocatable.get('memory', '0'))
                     pods = allocatable.get('pods', '0')
 
+                    k8s_status = get_k8s_version_status(git_version, c_name)
+
                     downstream_clusters.append({
                         "Rancher Server": instance['name'],
-                        "Cluster Name": cluster.get('name'),
+                        "Cluster Name": c_name,
                         "Provider Type": provider_type,
                         "K8s Distribution": k8s_dist,
                         "Full K8s Version": git_version,
+                        "K8s Status": k8s_status,
                         "CPU Arch": arch,
                         "Region": region if region else "N/A",
                         "CPU (Cores)": cpu_cores,
@@ -388,7 +391,6 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
     section_fmt = workbook.add_format({'bold': True, 'bg_color': '#E2EFDA', 'border': 1})
     harvester_section_fmt = workbook.add_format({'bold': True, 'bg_color': '#F8CBAD', 'border': 1})
 
-    # Traffic light formats are now explicitly centered so versions look sharp
     status_fmt = {
         "Green": workbook.add_format({'border': 1, 'align': 'center', 'bg_color': '#C6EFCE', 'font_color': '#006100'}),
         "Yellow": workbook.add_format({'border': 1, 'align': 'center', 'bg_color': '#FFEB9C', 'font_color': '#9C5700'}),
@@ -405,11 +407,9 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
     for s in server_summaries:
         for col, key in enumerate(sum_headers):
             if key == "Local K8s Version":
-                k8s_status = get_k8s_version_status(s[key], f"[{s['Name']}] Local Server")
-                worksheet.write(curr_row, col, s[key], status_fmt.get(k8s_status, data_center_fmt))
+                worksheet.write(curr_row, col, s[key], status_fmt.get(s["K8s Status"], data_center_fmt))
             elif key == "Rancher Version":
-                rancher_status = get_rancher_version_status(s[key], s["Name"])
-                worksheet.write(curr_row, col, s[key], status_fmt.get(rancher_status, data_center_fmt))
+                worksheet.write(curr_row, col, s[key], status_fmt.get(s["Rancher Status"], data_center_fmt))
             else:
                 worksheet.write(curr_row, col, s[key], data_fmt)
         curr_row += 1
@@ -433,13 +433,8 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
             subset = df_harvester[df_harvester['Rancher Server'] == server]
             for _, r in subset.iterrows():
                 worksheet.write(curr_row, 0, r['Cluster Name'], data_fmt)
-                
-                hv_status = get_harvester_version_status(r['Harvester Version'], r['Cluster Name'])
-                worksheet.write(curr_row, 1, r['Harvester Version'], status_fmt.get(hv_status, data_center_fmt))
-                
-                k8s_status = get_k8s_version_status(r['Kubernetes Version'], r['Cluster Name'])
-                worksheet.write(curr_row, 2, r['Kubernetes Version'], status_fmt.get(k8s_status, data_center_fmt))
-                
+                worksheet.write(curr_row, 1, r['Harvester Version'], status_fmt.get(r['Harvester Status'], data_center_fmt))
+                worksheet.write(curr_row, 2, r['Kubernetes Version'], status_fmt.get(r['K8s Status'], data_center_fmt))
                 worksheet.write(curr_row, 3, r['CPU Arch'], data_center_fmt)
                 worksheet.write(curr_row, 4, r['Rancher Server'], data_fmt)
                 worksheet.write(curr_row, 5, r['Comments'], data_fmt)
@@ -471,10 +466,7 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
                 worksheet.write(curr_row, 0, r['Cluster Name'], data_fmt)
                 worksheet.write(curr_row, 1, r['Provider Type'], data_fmt)
                 worksheet.write(curr_row, 2, r['K8s Distribution'], data_fmt)
-                
-                k8s_status = get_k8s_version_status(r['Full K8s Version'], r['Cluster Name'])
-                worksheet.write(curr_row, 3, r['Full K8s Version'], status_fmt.get(k8s_status, data_center_fmt))
-                
+                worksheet.write(curr_row, 3, r['Full K8s Version'], status_fmt.get(r['K8s Status'], data_center_fmt))
                 worksheet.write(curr_row, 4, r['CPU Arch'], data_center_fmt)
                 worksheet.write(curr_row, 5, r['Region'], data_fmt)
                 worksheet.write(curr_row, 6, r['CPU (Cores)'], data_center_fmt)
@@ -493,12 +485,116 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
     worksheet.set_column(9, 9, 20) 
 
     writer.close()
-    print(f"\n✅ Spreadsheet saved: {filename}")
+    print(f"✅ Spreadsheet saved: {filename}")
+
+# ==========================================
+# EXCALIDRAW-COMPATIBLE DIAGRAM GENERATOR
+# ==========================================
+def generate_mermaid_diagram(server_summaries, downstream_clusters, harvester_clusters, filename="rancher_architecture.md"):
+    """Generates a Markdown file with Excalidraw-safe Mermaid syntax."""
+    
+    # Pre-defined status colors matching the Excel sheet
+    status_colors = {
+        "Green": {"fill": "#C6EFCE", "stroke": "#006100"},
+        "Yellow": {"fill": "#FFEB9C", "stroke": "#9C5700"},
+        "Red": {"fill": "#FFC7CE", "stroke": "#9C0006"},
+        "Unknown": {"fill": "#EEEEEE", "stroke": "#333333"}
+    }
+
+    lines = [
+        "```mermaid",
+        "flowchart TD",  # Top-Down Flow
+        "    %% Rancher Architecture Topology",
+        ""
+    ]
+
+    server_ids = {}
+
+    # 1. Create Root Nodes (Rancher Servers)
+    for idx, server in enumerate(server_summaries):
+        s_id = f"SERVER_{idx}"
+        server_ids[server["Name"]] = s_id
+        
+        name = str(server.get("Name", "Unknown")).replace('"', "'")
+        r_ver = str(server.get("Rancher Version", "Unknown")).replace('"', "'")
+        k_ver = str(server.get("Local K8s Version", "Unknown")).replace('"', "'")
+        reg = str(server.get("AWS Region", "N/A")).replace('"', "'")
+        backup = str(server.get("Backup Operator", "Not Found")).replace('"', "'")
+        
+        # Determine background color based on Rancher version status
+        colors = status_colors.get(server.get("Rancher Status", "Unknown"), status_colors["Unknown"])
+        
+        # Syntax `id("text")` forces a rounded rectangle shape natively in Excalidraw/Mermaid
+        label = f"🏢 {name} | 🐂 Rancher: {r_ver} | ☸️ K8s: {k_ver} | 🌍 Region: {reg} | 💾 Backup: {backup}"
+        lines.append(f'    {s_id}("{label}")')
+        
+        # Apply the dashed line style (stroke-dasharray) and dynamic color
+        lines.append(f'    style {s_id} fill:{colors["fill"]},stroke:{colors["stroke"]},stroke-width:2px,stroke-dasharray: 5 5,color:#000')
+
+    lines.append("")
+
+    # 2. Create Downstream Cluster Nodes & Connections
+    for idx, cluster in enumerate(downstream_clusters):
+        c_id = f"DS_{idx}"
+        parent_name = cluster.get("Rancher Server")
+        s_id = server_ids.get(parent_name)
+        
+        c_name = str(cluster.get("Cluster Name", "Unknown")).replace('"', "'")
+        prov = str(cluster.get("Provider Type", "Unknown")).replace('"', "'")
+        dist = str(cluster.get("K8s Distribution", "Unknown")).replace('"', "'")
+        k_ver = str(cluster.get("Full K8s Version", "Unknown")).replace('"', "'")
+        reg = str(cluster.get("Region", "Unknown")).replace('"', "'")
+        
+        # Color based on Kubernetes version status
+        colors = status_colors.get(cluster.get("K8s Status", "Unknown"), status_colors["Unknown"])
+
+        label = f"☸️ {c_name} | Provider: {prov} | Distro: {dist} | K8s: {k_ver} | Region: {reg}"
+        lines.append(f'    {c_id}("{label}")')
+        lines.append(f'    style {c_id} fill:{colors["fill"]},stroke:{colors["stroke"]},stroke-width:2px,stroke-dasharray: 5 5,color:#000')
+        
+        if s_id:
+            lines.append(f'    {s_id} --> {c_id}')
+
+    lines.append("")
+
+    # 3. Create Harvester Nodes & Connections
+    for idx, cluster in enumerate(harvester_clusters):
+        h_id = f"HV_{idx}"
+        parent_name = cluster.get("Rancher Server")
+        s_id = server_ids.get(parent_name)
+        
+        c_name = str(cluster.get("Cluster Name", "Unknown")).replace('"', "'")
+        h_ver = str(cluster.get("Harvester Version", "Unknown")).replace('"', "'")
+        k_ver = str(cluster.get("Kubernetes Version", "Unknown")).replace('"', "'")
+        arch = str(cluster.get("CPU Arch", "Unknown")).replace('"', "'")
+        
+        # Color based on Harvester version status
+        colors = status_colors.get(cluster.get("Harvester Status", "Unknown"), status_colors["Unknown"])
+
+        label = f"🚜 {c_name} | Harvester: {h_ver} | K8s: {k_ver} | Arch: {arch}"
+        lines.append(f'    {h_id}("{label}")')
+        lines.append(f'    style {h_id} fill:{colors["fill"]},stroke:{colors["stroke"]},stroke-width:2px,stroke-dasharray: 5 5,color:#000')
+        
+        if s_id:
+            lines.append(f'    {s_id} --> {h_id}')
+
+    lines.append("```")
+
+    try:
+        with open(filename, "w") as f:
+            f.write("\n".join(lines))
+        print(f"✅ Architecture diagram saved: {filename}")
+    except Exception as e:
+        print(f"⚠️ Failed to write Mermaid diagram: {e}")
+
 
 if __name__ == "__main__":
     config = load_config()
     if config and "rancher_instances" in config:
         instances = config['rancher_instances']
+        
         server_list = [get_server_summary(i) for i in instances]
         regular_clusters, harvester_clusters = get_cluster_data(instances)
+        
         save_styled_excel(server_list, regular_clusters, harvester_clusters)
+        generate_mermaid_diagram(server_list, regular_clusters, harvester_clusters)
