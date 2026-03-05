@@ -1,8 +1,3 @@
-You are totally rightâ€”nesting those Markdown code blocks inside a bash command can definitely cause parsers to trip up and break the formatting!
-
-Here is the pure, complete Markdown for your `instructions.md` file. You can copy this block directly and paste it into your editor:
-
-```markdown
 # Operational Instructions: Rancher Audit Tool
 
 This guide explains how to configure, run, and interpret the outputs of the Rancher Audit script.
@@ -75,8 +70,3 @@ Because this diagram uses rich HTML formatting and Unicode indicator blocks (ðŸŸ
 * **Method 3 (Local):** Use a Markdown viewer like Obsidian, Notion, or the VS Code "Markdown Preview Mermaid Support" extension.
 *(Note: Excalidraw's Mermaid importer strips HTML tags and is not recommended for this specific diagram format).*
 
-```
-
-Would you like me to output the pure Markdown for the `README.md` file as well, just to make sure that one formats perfectly for you too?
-
-```
