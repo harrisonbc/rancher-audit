@@ -18,7 +18,7 @@ rancher_instances:
     url: "[https://rancher-prime.yourdomain.com](https://rancher-prime.yourdomain.com)"
     token: "token-fghij:0987654321fedcba"
     comment: "Internal Tooling and Test Clusters"
-
+```
 
 -Here are the final pieces for your project. Having a `Makefile` will make running these scripts a breeze, and a well-written `README.md` ensures that if anyone else on your team needs to use this tool, they have all the context they need.
 -
