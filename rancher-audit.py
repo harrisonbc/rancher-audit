@@ -9,8 +9,19 @@ from datetime import datetime, timedelta
 # Disabling SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Global cache for the lifecycle API so we only fetch it once
+# Global caches for the lifecycle APIs
 _K8S_LIFECYCLES = None
+_RANCHER_LIFECYCLES = None
+
+# Hardcoded Harvester Lifecycles (Since no public API exists for Harvester yet)
+HARVESTER_LIFECYCLES = {
+    "1.7": {"eom": "2026-08-09", "eol": "2027-08-09"},
+    "1.6": {"eom": "2026-04-16", "eol": "2027-04-16"},
+    "1.5": {"eom": "2025-12-30", "eol": "2026-12-30"},
+    "1.4": {"eom": "2024-11-27", "eol": "2025-11-27"},
+    "1.3": {"eom": "2024-06-13", "eol": "2025-06-13"},
+    "1.2": {"eom": "2024-07-08", "eol": "2024-09-08"} 
+}
 
 def load_config(filepath="config.yaml"):
     if not os.path.exists(filepath):
@@ -47,68 +58,148 @@ def parse_memory(mem_val):
     return mem_str
 
 # ==========================================
-# DYNAMIC KUBERNETES LIFECYCLE TRACKER (API)
+# LIFECYCLE DATA FETCHERS & EVALUATORS
 # ==========================================
-def fetch_lifecycles():
-    """Fetches real-time Kubernetes EOL data from endoflife.date API."""
+
+def fetch_k8s_lifecycles():
     global _K8S_LIFECYCLES
     if _K8S_LIFECYCLES is not None:
         return _K8S_LIFECYCLES
-        
     try:
         print("🌐 Fetching dynamic Kubernetes lifecycle data from endoflife.date...")
         resp = requests.get("https://endoflife.date/api/kubernetes.json", timeout=10)
         resp.raise_for_status()
-        # Create a dictionary mapping version (e.g., '1.32') to its EOL date string
         _K8S_LIFECYCLES = {item['cycle']: item['eol'] for item in resp.json()}
     except Exception as e:
-        print(f"⚠️ Warning: Could not fetch dynamic lifecycle data: {e}")
+        print(f"⚠️ Warning: Could not fetch K8s lifecycle data: {e}")
         _K8S_LIFECYCLES = {} 
-        
     return _K8S_LIFECYCLES
 
+def fetch_rancher_lifecycles():
+    global _RANCHER_LIFECYCLES
+    if _RANCHER_LIFECYCLES is not None:
+        return _RANCHER_LIFECYCLES
+    try:
+        print("🌐 Fetching dynamic Rancher lifecycle data from endoflife.date...")
+        resp = requests.get("https://endoflife.date/api/rancher.json", timeout=10)
+        resp.raise_for_status()
+        _RANCHER_LIFECYCLES = {}
+        for item in resp.json():
+            # endoflife.date provides 'support' (EOM) and 'eol' for Rancher
+            eol = item.get('eol', '2000-01-01')
+            eom = item.get('support')
+            if not isinstance(eom, str):
+                # Fallback to a 60-day warning window if EOM is missing
+                eol_date = datetime.strptime(eol, "%Y-%m-%d").date()
+                eom = (eol_date - timedelta(days=60)).strftime("%Y-%m-%d")
+            _RANCHER_LIFECYCLES[item['cycle']] = {"eol": eol, "eom": eom}
+    except Exception as e:
+        print(f"⚠️ Warning: Could not fetch Rancher lifecycle data: {e}")
+        _RANCHER_LIFECYCLES = {} 
+    return _RANCHER_LIFECYCLES
+
 def get_k8s_version_status(version_str, cluster_name="Unknown"):
-    """Determines if a K8s version is Supported (Green), Warning (Yellow), or EOL (Red)."""
-    if not version_str or version_str in ["Unknown", "N/A"]:
-        return "Unknown"
-    
+    if not version_str or version_str in ["Unknown", "N/A"]: return "Unknown"
     match = re.search(r'v?(1\.\d+)', str(version_str))
-    if not match:
-        return "Unknown"
-        
+    if not match: return "Unknown"
     minor_version = match.group(1)
-    lifecycles = fetch_lifecycles()
+    lifecycles = fetch_k8s_lifecycles()
     
     if not lifecycles or minor_version not in lifecycles:
         try:
             minor_num = int(minor_version.split('.')[1])
             if minor_num < 28: 
-                print(f"    -> 🟥 [RED] {cluster_name} (Version {version_str} is extremely old)")
+                print(f"    -> 🟥 [RED] K8s Cluster {cluster_name} (Version {version_str} is extremely old)")
                 return "Red" 
-        except Exception:
-            pass
+            elif minor_num >= 34: 
+                print(f"    -> 🟩 [GREEN] K8s Cluster {cluster_name} (Version {version_str} is brand new)")
+                return "Green" 
+        except Exception: pass
         return "Unknown"
         
     today = datetime.now().date()
-    eol_date_str = lifecycles[minor_version]
-    eol_date = datetime.strptime(eol_date_str, "%Y-%m-%d").date()
-    
-    # Yellow Warning Window: 60 days before the official End of Life
+    eol_date = datetime.strptime(lifecycles[minor_version], "%Y-%m-%d").date()
     warning_date = eol_date - timedelta(days=60)
     
     if today >= eol_date:
-        print(f"    -> 🟥 [RED] {cluster_name} (Version {version_str} passed EOL on {eol_date})")
+        print(f"    -> 🟥 [RED] K8s Cluster {cluster_name} (Version {version_str} passed EOL on {eol_date})")
         return "Red"
     elif today >= warning_date:
-        print(f"    -> 🟨 [YELLOW] {cluster_name} (Version {version_str} entered warning window on {warning_date})")
+        print(f"    -> 🟨 [YELLOW] K8s Cluster {cluster_name} (Version {version_str} entered warning window on {warning_date})")
         return "Yellow"
     else:
-        print(f"    -> 🟩 [GREEN] {cluster_name} (Version {version_str} is supported)")
+        print(f"    -> 🟩 [GREEN] K8s Cluster {cluster_name} (Version {version_str} is supported)")
+        return "Green"
+
+def get_rancher_version_status(version_str, server_name="Unknown"):
+    if not version_str or version_str in ["Unknown", "N/A"]: return "Unknown"
+    match = re.search(r'v?(2\.\d+)', str(version_str))
+    if not match: return "Unknown"
+    minor_version = match.group(1)
+    lifecycles = fetch_rancher_lifecycles()
+    
+    if not lifecycles or minor_version not in lifecycles:
+        try:
+            minor_num = int(minor_version.split('.')[1])
+            if minor_num < 8: 
+                print(f"    -> 🟥 [RED] Rancher Server {server_name} (Version {version_str} is extremely old)")
+                return "Red" 
+            elif minor_num >= 12: 
+                print(f"    -> 🟩 [GREEN] Rancher Server {server_name} (Version {version_str} is brand new)")
+                return "Green" 
+        except Exception: pass
+        return "Unknown"
+        
+    today = datetime.now().date()
+    eol_date = datetime.strptime(lifecycles[minor_version]["eol"], "%Y-%m-%d").date()
+    eom_date = datetime.strptime(lifecycles[minor_version]["eom"], "%Y-%m-%d").date()
+    
+    if today >= eol_date:
+        print(f"    -> 🟥 [RED] Rancher Server {server_name} (Version {version_str} passed EOL on {eol_date})")
+        return "Red"
+    elif today >= eom_date:
+        print(f"    -> 🟨 [YELLOW] Rancher Server {server_name} (Version {version_str} passed EOM on {eom_date})")
+        return "Yellow"
+    else:
+        print(f"    -> 🟩 [GREEN] Rancher Server {server_name} (Version {version_str} is supported)")
+        return "Green"
+
+def get_harvester_version_status(version_str, cluster_name="Unknown"):
+    if not version_str or version_str in ["Unknown", "N/A"]: return "Unknown"
+    match = re.search(r'v?(1\.\d+)', str(version_str))
+    if not match: return "Unknown"
+    minor_version = match.group(1)
+    
+    if minor_version not in HARVESTER_LIFECYCLES:
+        try:
+            minor_num = int(minor_version.split('.')[1])
+            if minor_num < 4: 
+                print(f"    -> 🟥 [RED] Harvester {cluster_name} (Version {version_str} is extremely old)")
+                return "Red"
+            elif minor_num >= 8:
+                print(f"    -> 🟩 [GREEN] Harvester {cluster_name} (Version {version_str} is brand new)")
+                return "Green" 
+        except Exception: pass
+        return "Unknown"
+        
+    today = datetime.now().date()
+    eol_date = datetime.strptime(HARVESTER_LIFECYCLES[minor_version]["eol"], "%Y-%m-%d").date()
+    eom_date = datetime.strptime(HARVESTER_LIFECYCLES[minor_version]["eom"], "%Y-%m-%d").date()
+    
+    if today >= eol_date:
+        print(f"    -> 🟥 [RED] Harvester {cluster_name} (Version {version_str} passed EOL on {eol_date})")
+        return "Red"
+    elif today >= eom_date:
+        print(f"    -> 🟨 [YELLOW] Harvester {cluster_name} (Version {version_str} passed EOM on {eom_date})")
+        return "Yellow"
+    else:
+        print(f"    -> 🟩 [GREEN] Harvester {cluster_name} (Version {version_str} is supported)")
         return "Green"
 
 # ==========================================
 # STANDARD AUDIT FUNCTIONS
 # ==========================================
+
 def get_server_summary(instance):
     headers = {"Authorization": f"Bearer {instance['token']}"}
     base_url = instance['url'].rstrip('/')
@@ -198,7 +289,7 @@ def get_cluster_data(instances):
     harvester_clusters = []
     
     for instance in instances:
-        print(f"Fetching clusters from {instance['name']}...")
+        print(f"\n🚀 Scanning Rancher Instance: {instance['name']}...")
         headers = {"Authorization": f"Bearer {instance['token']}"}
         base_url = instance['url'].rstrip('/')
         api_url = f"{base_url}/v3/clusters"
@@ -297,11 +388,12 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
     section_fmt = workbook.add_format({'bold': True, 'bg_color': '#E2EFDA', 'border': 1})
     harvester_section_fmt = workbook.add_format({'bold': True, 'bg_color': '#F8CBAD', 'border': 1})
 
+    # Traffic light formats are now explicitly centered so versions look sharp
     status_fmt = {
-        "Green": workbook.add_format({'border': 1, 'bg_color': '#C6EFCE', 'font_color': '#006100'}),
-        "Yellow": workbook.add_format({'border': 1, 'bg_color': '#FFEB9C', 'font_color': '#9C5700'}),
-        "Red": workbook.add_format({'border': 1, 'bg_color': '#FFC7CE', 'font_color': '#9C0006'}),
-        "Unknown": data_fmt
+        "Green": workbook.add_format({'border': 1, 'align': 'center', 'bg_color': '#C6EFCE', 'font_color': '#006100'}),
+        "Yellow": workbook.add_format({'border': 1, 'align': 'center', 'bg_color': '#FFEB9C', 'font_color': '#9C5700'}),
+        "Red": workbook.add_format({'border': 1, 'align': 'center', 'bg_color': '#FFC7CE', 'font_color': '#9C0006'}),
+        "Unknown": data_center_fmt
     }
 
     worksheet.write(0, 0, "MANAGEMENT SERVER SUMMARY", title_fmt)
@@ -313,8 +405,11 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
     for s in server_summaries:
         for col, key in enumerate(sum_headers):
             if key == "Local K8s Version":
-                k8s_status = get_k8s_version_status(s[key], s["Name"])
-                worksheet.write(curr_row, col, s[key], status_fmt.get(k8s_status, data_fmt))
+                k8s_status = get_k8s_version_status(s[key], f"[{s['Name']}] Local Server")
+                worksheet.write(curr_row, col, s[key], status_fmt.get(k8s_status, data_center_fmt))
+            elif key == "Rancher Version":
+                rancher_status = get_rancher_version_status(s[key], s["Name"])
+                worksheet.write(curr_row, col, s[key], status_fmt.get(rancher_status, data_center_fmt))
             else:
                 worksheet.write(curr_row, col, s[key], data_fmt)
         curr_row += 1
@@ -338,10 +433,12 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
             subset = df_harvester[df_harvester['Rancher Server'] == server]
             for _, r in subset.iterrows():
                 worksheet.write(curr_row, 0, r['Cluster Name'], data_fmt)
-                worksheet.write(curr_row, 1, r['Harvester Version'], data_center_fmt)
+                
+                hv_status = get_harvester_version_status(r['Harvester Version'], r['Cluster Name'])
+                worksheet.write(curr_row, 1, r['Harvester Version'], status_fmt.get(hv_status, data_center_fmt))
                 
                 k8s_status = get_k8s_version_status(r['Kubernetes Version'], r['Cluster Name'])
-                worksheet.write(curr_row, 2, r['Kubernetes Version'], status_fmt.get(k8s_status, data_fmt))
+                worksheet.write(curr_row, 2, r['Kubernetes Version'], status_fmt.get(k8s_status, data_center_fmt))
                 
                 worksheet.write(curr_row, 3, r['CPU Arch'], data_center_fmt)
                 worksheet.write(curr_row, 4, r['Rancher Server'], data_fmt)
@@ -376,7 +473,7 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
                 worksheet.write(curr_row, 2, r['K8s Distribution'], data_fmt)
                 
                 k8s_status = get_k8s_version_status(r['Full K8s Version'], r['Cluster Name'])
-                worksheet.write(curr_row, 3, r['Full K8s Version'], status_fmt.get(k8s_status, data_fmt))
+                worksheet.write(curr_row, 3, r['Full K8s Version'], status_fmt.get(k8s_status, data_center_fmt))
                 
                 worksheet.write(curr_row, 4, r['CPU Arch'], data_center_fmt)
                 worksheet.write(curr_row, 5, r['Region'], data_fmt)
