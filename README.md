@@ -1,22 +1,32 @@
-# Rancher Multi-Environment Audit Tool
+# Rancher Multi-Cluster Audit Tool
 
-A Python-based automation tool designed to interact with multiple SUSE Rancher management servers via the v3 API. It gathers deep inventory data on the management planes, standard downstream Kubernetes clusters (EKS, RKE, K3s, Custom), and Harvester HCI environments, exporting the data into a cleanly formatted, executive-ready Excel spreadsheet.
+An automated, Python-based auditing script designed to query multiple Rancher management servers, extract downstream cluster and Harvester hypervisor inventory, and generate compliance-ready Excel reports and architecture diagrams.
 
-## Features
-* **Multi-Instance Support**: Query multiple Rancher instances simultaneously.
-* **Smart Provider Detection**: Accurately maps internal drivers to human-readable providers (AWS EKS, Harvester, Imported, Local, Virtual, Custom).
-* **Deep Node Inspection**: Extracts AWS Regions, CPU Architectures (`amd64`/`arm64`), and OS Images directly from underlying node metadata.
-* **Capacity Aggregation**: Calculates true allocatable CPU, Memory (in GiB), and Pod capacity.
-* **Token Rotation**: Includes a standalone script to safely auto-rotate Rancher Bearer tokens without requiring manual UI intervention.
+## 🚀 Key Features
 
-## Prerequisites
+* **Multi-Instance Support:** Query multiple Rancher Management planes simultaneously using Bearer tokens.
+* **Dynamic Lifecycle Tracking:** Integrates with the `endoflife.date` API to dynamically evaluate Kubernetes and Rancher versions, automatically flagging them as Supported (Green), Warning/End of Maintenance (Yellow), or End of Life (Red).
+* **Harvester Lifecycle Support:** Includes a built-in lifecycle matrix to track Harvester bare-metal hypervisor support windows.
+* **Cross-Region Compliance:** Automatically detects and flags downstream clusters that are deployed in a different AWS region than their managing Rancher control plane.
+* **Color-Coded Excel Reporting:** Generates a highly formatted `rancher_inventory.xlsx` spreadsheet with traffic-light styling for immediate visual identification of aging infrastructure.
+* **Automated Architecture Diagrams:** Generates a rich-HTML Mermaid diagram (`rancher_architecture.md`) mapping your entire infrastructure topology, complete with version badges, health status blocks (🟩 🟨 🟥), and region tracking.
+
+## 📋 Prerequisites
+
 * Python 3.8+
-* Valid Rancher API Bearer Tokens ("No Scope" required for full visibility)
+* A generic `config.yaml` file containing your Rancher API tokens.
 
-## Setup & Installation
+**Required Python Libraries:**
+`requests`, `pandas`, `urllib3`, `pyyaml`, `xlsxwriter`
+*(Install via `pip install -r requirements.txt` or `make install` if using the provided Makefile).*
 
-1. **Clone/Download the repository** to your local machine.
-2. **(Optional but recommended)** Create a virtual environment:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
+## 🛠️ Usage
+
+1. Clone the repository.
+2. Ensure your `config.yaml` is populated with your environment details.
+3. Run the audit via Make:
+   \`make audit\`
+4. Review the real-time terminal output, then open `rancher_inventory.xlsx` and `rancher_architecture.md`.
+
+## Status
+Ready for production.

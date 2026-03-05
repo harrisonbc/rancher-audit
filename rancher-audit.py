@@ -459,6 +459,10 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
         curr_row += 1
         df_clusters = pd.DataFrame(downstream_clusters)
         for server in df_clusters['Rancher Server'].unique():
+            
+            # Identify the parent server's region to compare against downstream clusters
+            parent_region = next((s.get("AWS Region", "N/A") for s in server_summaries if s["Name"] == server), "N/A")
+            
             worksheet.merge_range(curr_row, 0, curr_row, len(cluster_headers)-1, f"Environment: {server}", section_fmt)
             curr_row += 1
             subset = df_clusters[df_clusters['Rancher Server'] == server]
@@ -468,7 +472,18 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
                 worksheet.write(curr_row, 2, r['K8s Distribution'], data_fmt)
                 worksheet.write(curr_row, 3, r['Full K8s Version'], status_fmt.get(r['K8s Status'], data_center_fmt))
                 worksheet.write(curr_row, 4, r['CPU Arch'], data_center_fmt)
-                worksheet.write(curr_row, 5, r['Region'], data_fmt)
+                
+                # Check for Region Mismatches
+                c_reg = r['Region']
+                if c_reg in ["N/A", "Unknown", ""] or parent_region in ["N/A", "Unknown", ""]:
+                    reg_status = "Unknown"
+                elif c_reg == parent_region:
+                    reg_status = "Green"
+                else:
+                    reg_status = "Red"
+                    
+                worksheet.write(curr_row, 5, c_reg, status_fmt.get(reg_status, data_center_fmt))
+                
                 worksheet.write(curr_row, 6, r['CPU (Cores)'], data_center_fmt)
                 worksheet.write(curr_row, 7, r['Memory'], data_center_fmt)
                 worksheet.write(curr_row, 8, r['Total Pods'], data_center_fmt)
@@ -521,12 +536,10 @@ def generate_mermaid_diagram(server_summaries, downstream_clusters, harvester_cl
         reg = str(server.get("AWS Region", "N/A")).replace('"', "'")
         backup = str(server.get("Backup Operator", "Not Found")).replace('"', "'")
         
-        # Grab the correct square based on status
         r_box = status_boxes.get(server.get("Rancher Status", "Unknown"), status_boxes["Unknown"])
         k_box = status_boxes.get(server.get("K8s Status", "Unknown"), status_boxes["Unknown"])
         
-        # Build the label placing the box right after the version text
-        label = f"🏢 <b style='font-size: 2em;'>{name}</b><br><br>Rancher: 🐂 {r_ver} {r_box}<br><br>K8s: ☸️ {k_ver} {k_box}<br><br>🌍 Region: {reg}<br>💾 Backup: {backup}"
+        label = f"🏢 <b style='font-size: 2em;'>{name}</b><br><br>Rancher: 🐄 {r_ver} {r_box}<br><br>K8s: ☸️ {k_ver} {k_box}<br><br>🌍 Region: {reg}<br>💾 Backup: {backup}"
         lines.append(f'    {s_id}("{label}")')
         
         lines.append(f'    style {s_id} fill:#e2efda,stroke:#217346,stroke-width:2px,stroke-dasharray: 5 5,color:#000000')
@@ -539,15 +552,29 @@ def generate_mermaid_diagram(server_summaries, downstream_clusters, harvester_cl
         parent_name = cluster.get("Rancher Server")
         s_id = server_ids.get(parent_name)
         
+        # Grab parent region for compliance check
+        parent_region = next((s.get("AWS Region", "N/A") for s in server_summaries if s["Name"] == parent_name), "N/A")
+        
         c_name = str(cluster.get("Cluster Name", "Unknown")).replace('"', "'")
         prov = str(cluster.get("Provider Type", "Unknown")).replace('"', "'")
         dist = str(cluster.get("K8s Distribution", "Unknown")).replace('"', "'")
         k_ver = str(cluster.get("Full K8s Version", "Unknown")).replace('"', "'")
         reg = str(cluster.get("Region", "Unknown")).replace('"', "'")
         
+        # Version Check
         k_box = status_boxes.get(cluster.get("K8s Status", "Unknown"), status_boxes["Unknown"])
+        
+        # Region Mismatch Check
+        if reg in ["N/A", "Unknown", ""] or parent_region in ["N/A", "Unknown", ""]:
+            reg_status = "Unknown"
+        elif reg == parent_region:
+            reg_status = "Green"
+        else:
+            reg_status = "Red"
+        
+        reg_box = status_boxes.get(reg_status, status_boxes["Unknown"])
 
-        label = f"<b style='font-size: 2em;'>{c_name}</b><br><br>Provider: {prov}<br>Distro: {dist}<br><br>K8s: ☸️ {k_ver} {k_box}<br><br>🌍 Region: {reg}"
+        label = f"<b style='font-size: 2em;'>{c_name}</b><br><br>Provider: {prov}<br>Distro: {dist}<br><br>K8s: ☸️ {k_ver} {k_box}<br><br>🌍 Region: {reg} {reg_box}"
         lines.append(f'    {c_id}("{label}")')
         
         lines.append(f'    style {c_id} fill:#ffffff,stroke:#cccccc,stroke-width:2px,stroke-dasharray: 5 5,color:#000000')
