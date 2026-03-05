@@ -488,22 +488,22 @@ def save_styled_excel(server_summaries, downstream_clusters, harvester_clusters,
     print(f"✅ Spreadsheet saved: {filename}")
 
 # ==========================================
-# EXCALIDRAW-COMPATIBLE DIAGRAM GENERATOR
+# RICH HTML DIAGRAM GENERATOR
 # ==========================================
 def generate_mermaid_diagram(server_summaries, downstream_clusters, harvester_clusters, filename="rancher_architecture.md"):
-    """Generates a Markdown file with Excalidraw-safe Mermaid syntax."""
+    """Generates a Markdown file using Unicode squares for unbreakable status tracking."""
     
-    # Pre-defined status colors matching the Excel sheet
-    status_colors = {
-        "Green": {"fill": "#C6EFCE", "stroke": "#006100"},
-        "Yellow": {"fill": "#FFEB9C", "stroke": "#9C5700"},
-        "Red": {"fill": "#FFC7CE", "stroke": "#9C0006"},
-        "Unknown": {"fill": "#EEEEEE", "stroke": "#333333"}
+    # Bulletproof Unicode indicator boxes
+    status_boxes = {
+        "Green": "🟩",
+        "Yellow": "🟨",
+        "Red": "🟥",
+        "Unknown": "⬜"
     }
 
     lines = [
         "```mermaid",
-        "flowchart TD",  # Top-Down Flow
+        "flowchart TD",  
         "    %% Rancher Architecture Topology",
         ""
     ]
@@ -521,15 +521,15 @@ def generate_mermaid_diagram(server_summaries, downstream_clusters, harvester_cl
         reg = str(server.get("AWS Region", "N/A")).replace('"', "'")
         backup = str(server.get("Backup Operator", "Not Found")).replace('"', "'")
         
-        # Determine background color based on Rancher version status
-        colors = status_colors.get(server.get("Rancher Status", "Unknown"), status_colors["Unknown"])
+        # Grab the correct square based on status
+        r_box = status_boxes.get(server.get("Rancher Status", "Unknown"), status_boxes["Unknown"])
+        k_box = status_boxes.get(server.get("K8s Status", "Unknown"), status_boxes["Unknown"])
         
-        # Syntax `id("text")` forces a rounded rectangle shape natively in Excalidraw/Mermaid
-        label = f"🏢 {name} | 🐂 Rancher: {r_ver} | ☸️ K8s: {k_ver} | 🌍 Region: {reg} | 💾 Backup: {backup}"
+        # Build the label placing the box right after the version text
+        label = f"🏢 <b style='font-size: 2em;'>{name}</b><br><br>Rancher: 🐂 {r_ver} {r_box}<br><br>K8s: ☸️ {k_ver} {k_box}<br><br>🌍 Region: {reg}<br>💾 Backup: {backup}"
         lines.append(f'    {s_id}("{label}")')
         
-        # Apply the dashed line style (stroke-dasharray) and dynamic color
-        lines.append(f'    style {s_id} fill:{colors["fill"]},stroke:{colors["stroke"]},stroke-width:2px,stroke-dasharray: 5 5,color:#000')
+        lines.append(f'    style {s_id} fill:#e2efda,stroke:#217346,stroke-width:2px,stroke-dasharray: 5 5,color:#000000')
 
     lines.append("")
 
@@ -545,12 +545,12 @@ def generate_mermaid_diagram(server_summaries, downstream_clusters, harvester_cl
         k_ver = str(cluster.get("Full K8s Version", "Unknown")).replace('"', "'")
         reg = str(cluster.get("Region", "Unknown")).replace('"', "'")
         
-        # Color based on Kubernetes version status
-        colors = status_colors.get(cluster.get("K8s Status", "Unknown"), status_colors["Unknown"])
+        k_box = status_boxes.get(cluster.get("K8s Status", "Unknown"), status_boxes["Unknown"])
 
-        label = f"☸️ {c_name} | Provider: {prov} | Distro: {dist} | K8s: {k_ver} | Region: {reg}"
+        label = f"<b style='font-size: 2em;'>{c_name}</b><br><br>Provider: {prov}<br>Distro: {dist}<br><br>K8s: ☸️ {k_ver} {k_box}<br><br>🌍 Region: {reg}"
         lines.append(f'    {c_id}("{label}")')
-        lines.append(f'    style {c_id} fill:{colors["fill"]},stroke:{colors["stroke"]},stroke-width:2px,stroke-dasharray: 5 5,color:#000')
+        
+        lines.append(f'    style {c_id} fill:#ffffff,stroke:#cccccc,stroke-width:2px,stroke-dasharray: 5 5,color:#000000')
         
         if s_id:
             lines.append(f'    {s_id} --> {c_id}')
@@ -568,12 +568,13 @@ def generate_mermaid_diagram(server_summaries, downstream_clusters, harvester_cl
         k_ver = str(cluster.get("Kubernetes Version", "Unknown")).replace('"', "'")
         arch = str(cluster.get("CPU Arch", "Unknown")).replace('"', "'")
         
-        # Color based on Harvester version status
-        colors = status_colors.get(cluster.get("Harvester Status", "Unknown"), status_colors["Unknown"])
+        h_box = status_boxes.get(cluster.get("Harvester Status", "Unknown"), status_boxes["Unknown"])
+        k_box = status_boxes.get(cluster.get("K8s Status", "Unknown"), status_boxes["Unknown"])
 
-        label = f"🚜 {c_name} | Harvester: {h_ver} | K8s: {k_ver} | Arch: {arch}"
+        label = f"<b style='font-size: 2em;'>{c_name}</b><br><br>Harvester: 🚜 {h_ver} {h_box}<br><br>K8s: ☸️ {k_ver} {k_box}<br><br>Arch: {arch}"
         lines.append(f'    {h_id}("{label}")')
-        lines.append(f'    style {h_id} fill:{colors["fill"]},stroke:{colors["stroke"]},stroke-width:2px,stroke-dasharray: 5 5,color:#000')
+        
+        lines.append(f'    style {h_id} fill:#fce4d6,stroke:#c65911,stroke-width:2px,stroke-dasharray: 5 5,color:#000000')
         
         if s_id:
             lines.append(f'    {s_id} --> {h_id}')
